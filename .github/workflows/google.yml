@@ -1,0 +1,138 @@
+# This workflow will build a docker container, publish it to Google Container Registry, and deploy it to GKE when there is a push to the "master" branch.
+#
+# To configure this workflow:
+#
+# 1. Ensure that your repository contains the necessary configuration for your Google Kubernetes Engine cluster, including deployment.yml, kustomization.yml, service.yml, etc.
+#
+# 2. Create and configure a Workload Identity Provider for GitHub (https://github.com/google-github-actions/auth#setting-up-workload-identity-federation)
+#
+# 3. Change the values for the GAR_LOCATION, GKE_ZONE, GKE_CLUSTER, IMAGE, REPOSITORY and DEPLOYMENT_NAME environment variables (below).
+#
+# For more support on how to run the workflow, please visit https://github.com/google-github-actions/setup-gcloud/tree/master/example-workflows/gke-kustomize
+
+name: Build and Deploy to GKE
+
+on:
+  push:
+    branches: [ "master" ]
+
+env:
+  PROJECT_ID: ${{ secrets.GKE_PROJECT }}
+  GAR_LOCATION: us-central1 # TODO: update region of the Artifact Registry
+  GKE_CLUSTER: cluster-1    # TODO: update to cluster name
+  GKE_ZONE: us-central1-c   # TODO: update to cluster zone
+  DEPLOYMENT_NAME: gke-test # TODO: update to deployment name
+  REPOSITORY: samples # TODO: update to Artifact Registry docker repository
+  IMAGE: static-site
+
+jobs:
+  setup-build-publish-deploy:
+    name: Setup, Build, Publish, and Deploy
+    runs-on: ubuntu-latest
+    environment: production
+
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    # Configure Workload Identity Federation and generate an access token.
+    - id: 'auth'
+      name: 'Authenticate to Google Cloud'
+      uses: 'google-github-actions/auth@v0'
+      with:
+        token_format: 'access_token'
+        workload_identity_provider: 'projects/123456789/locations/global/workloadIdentityPools/my-pool/providers/my-provider'
+        service_account: 'my-service-account@my-project.iam.gserviceaccount.com'
+
+    # Alternative option - authentication via credentials json
+    # - id: 'auth'
+    #   uses: 'google-github-actions/auth@v0'
+    #   with:
+    #     credentials_json: '${{ secrets.GCP_CREDENTIALS }}'
+
+    - name: Docker configuration
+      run: |-
+        echo ${{steps.auth.outputs.access_token}} | docker login -u oauth2accesstoken --password-stdin https://$GAR_LOCATION-docker.pkg.dev
+    # Get the GKE credentials so we can deploy to the cluster
+    - name: Set up GKE credentials
+      uses: google-github-actions/get-gke-credentials@v0
+      with:
+        cluster_name: ${{ env.GKE_CLUSTER }}
+        location: ${{ env.GKE_ZONE }}
+
+    # Build the Docker image
+    - name: Build
+      run: |-
+        docker build \
+          --tag "$GAR_LOCATION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/$IMAGE:$GITHUB_SHA" \
+          --build-arg GITHUB_SHA="$GITHUB_SHA" \
+          --build-arg GITHUB_REF="$GITHUB_REF" \
+          .
+    # Push the Docker image to Google Artifact Registry
+    - name: Publish
+      run: |-
+        docker push "$GAR_LOCATION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/$IMAGE:$GITHUB_SHA"
+    # Set up kustomize
+    - name: Set up Kustomize
+      run: |-
+        curl -sfLo kustomize https://github.com/kubernetes-sigs/kustomize/releases/download/v3.1.0/kustomize_3.1.0_linux_amd64
+        chmod u+x ./kustomize
+    # Deploy the Docker image to the GKE cluster
+    - name: Deploy
+      run: |-
+        # replacing the image name in the k8s template
+        ./kustomize edit set image LOCATION-docker.pkg.dev/PROJECT_ID/REPOSITORY/IMAGE:TAG=$GAR_LOCATION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/$IMAGE:$GITHUB_SHA
+        ./kustomize build . | kubectl apply -f -
+        kubectl rollout status deployment/$DEPLOYMENT_NAME
+        kubectl get services -o wide
+            - name: Code Engine GitHub Action
+  # You may pin to the exact commit or the version.
+  # uses: IBM/code-engine-github-action@e7fd12ef5fd7ef8652286e9e800b2c226b393264
+  uses: IBM/code-engine-github-action@v1.0.0
+  with:
+    # IAM API Key used to log into the IBM Cloud
+    api-key: 
+    # An IBM Cloud Resource Group is a logical container used to organize and manage related cloud resources
+    resource-group: # optional
+    # The Region refers to a geographical area where the project is are located
+    region: 
+    # A Code Engine Project Is the grouping of your Apps, Functions and Jobs
+    project: 
+    # The type of component that should be deployed [App, Function, Job]
+    component: 
+    # Name of the App, Function or Job
+    name: 
+    # Runtime used for the Function only required for function
+    runtime: # optional
+    # path to the directory containing the source code
+    build-source: # optional, default is .
+    # CPU configuration set for the component. If not set default Code Engine values are used.
+    cpu: # optional
+    # Memory configuration set for the component. If not set default Code Engine values are used.
+    memory: # optional
+                      - name: Create NuGet Package for Octopus Deploy
+  # You may pin to the exact commit or the version.
+  # uses: OctopusDeploy/create-nuget-package-action@64e3cec8f57c50b3e7cdfabd006e4d1a24b94f4d
+  uses: OctopusDeploy/create-nuget-package-action@v3.0.2
+  with:
+    # Package Id.
+    package_id: 
+    # Package version.
+    version: 
+    # The folder to put the resulting package in, relative to the current working directory; not the base path.
+    output_folder: 
+    # The base path for the input files.
+    base_path: 
+    # Multi-line list of files to include in the package. Supports globbing.
+    files: 
+    # Description to include in the Nuspec file. 
+    nuspec_description: 
+    # Multi-line list of authors to include in the Nuspec file.
+    nuspec_authors: 
+    # Release notes to include in the Nuspec file.
+    nuspec_release_notes: # optional
+          
